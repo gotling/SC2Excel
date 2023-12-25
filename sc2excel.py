@@ -1,7 +1,14 @@
+import os
 import sc2reader
 from openpyxl import Workbook
 from openpyxl.worksheet.dimensions import ColumnDimension, DimensionHolder
+from openpyxl.chart import BarChart, Reference
 from openpyxl.utils import get_column_letter
+
+FILE_NAME = "sc2.xlsx"
+FOLDER = 'replays/'
+MINIMUM_PLAYERS = 2
+SUM_STRING = '=COUNTIFS(Players!$C:$C,$A{},Players!${}:${},"{}")'
 
 class Game():
     def __init__(self, replay):
@@ -25,9 +32,16 @@ def fixColumnWidth(ws):
 
     ws.column_dimensions = dim_holder
 
-replays = sc2reader.load_replays('replays/', load_level=2, load_map=True)
+def clean_name(name):
+    if name.startswith("A.I."):
+        return "A.I. " + name[name.index('('):]
+    else:
+        return name
+
+replays = sc2reader.load_replays(FOLDER, load_level=2, load_map=True)
 
 wb = Workbook()
+
 overviewWS = wb.active
 overviewWS.title = "Overview"
 overviewWS.append(['Name', 'Win', 'Loss', 'Terran', 'Zerg', 'Protoss'])
@@ -39,44 +53,81 @@ playersWS = wb.create_sheet("Players")
 playersWS.append(['Date', 'Map', 'Name', 'Race', 'Result'])
 
 all_players = []
+games = []
 
-for replay in replays:    
+for replay in replays:
     game = Game(replay)
-
-    if game.type == '1v1':
-        continue
+    games.append(game)
 
     print(f'{game.datetime} - {game.map.name} {game.type}, Game length: {round(game.length / 60)}:{game.length % 60}')
+
+for game in sorted(games, key=lambda x: x.datetime, reverse=True):
+    if len(game.players) <= MINIMUM_PLAYERS:
+        continue
 
     game_result = []
 
     for team in game.teams:
-        players = ", ".join([f'{player.name} ({player.play_race})' for player in team.players])
+        players = ", ".join([f'{clean_name(player.name)} ({player.play_race})' for player in team.players])
         game_result.append(f'{team.number} - {team.result} - {players}')
 
         for player in team.players:
-            playersWS.append([game.datetime, game.map.name, player.name, player.play_race, team.result])
-            if (player.name not in all_players):
-                all_players.append(player.name)
+            playersWS.append([game.datetime, game.map.name, clean_name(player.name), player.play_race, team.result])
+            if (clean_name(player.name) not in all_players):
+                all_players.append(clean_name(player.name))
 
     gamesWS.append([game.datetime, game.map.name, game.type, f'{round(game.length / 60)}:{game.length % 60}'] + game_result)
 
-for index, player in enumerate(all_players):
-    overviewWS.append([player, 
-                       f'=COUNTIFS(Players!$C:$C,$A{index+2},Players!$E:$E,"Win")', 
-                       f'=COUNTIFS(Players!$C:$C,$A{index+2},Players!$E:$E,"Loss")',
-                       f'=COUNTIFS(Players!$C:$C,$A{index+2},Players!$D:$D,"Terran")',
-                       f'=COUNTIFS(Players!$C:$C,$A{index+2},Players!$D:$D,"Zerg")',
-                       f'=COUNTIFS(Players!$C:$C,$A{index+2},Players!$D:$D,"Protoss")',
-                    ])
 
-fixColumnWidth(overviewWS)
-fixColumnWidth(gamesWS)
-fixColumnWidth(playersWS)
+for index, player in enumerate(all_players):
+    index += 2
+    overviewWS.append([
+        player, 
+        SUM_STRING.format(index, 'E', 'E', 'Win'), 
+        SUM_STRING.format(index, 'E', 'E', 'Loss'),
+        SUM_STRING.format(index, 'D', 'D', 'Terran'), 
+        SUM_STRING.format(index, 'D', 'D', 'Zerg'), 
+        SUM_STRING.format(index, 'D', 'D', 'Protoss')
+    ])
+
+overviewWS.column_dimensions['A'].width = 17
+
+gamesWS.column_dimensions['A'].width = 18
+gamesWS.column_dimensions['B'].width = 18
+gamesWS.column_dimensions['E'].width = 60
+gamesWS.column_dimensions['F'].width = 60
+
+playersWS.column_dimensions['A'].width = 18
+playersWS.column_dimensions['B'].width = 18
+playersWS.column_dimensions['C'].width = 18
 
 overviewWS.freeze_panes = overviewWS['A2']
 gamesWS.freeze_panes = gamesWS['A2']
 playersWS.freeze_panes = playersWS['A2']
 
+chart1 = BarChart()
+chart1.type = "col"
+chart1.style = 10
+chart1.title = "Wins / Losses"
+
+data = Reference(overviewWS, min_col=2, min_row=1, max_row=len(all_players) + 1, max_col=3)
+cats = Reference(overviewWS, min_col=1, min_row=2, max_row=len(all_players) + 1)
+chart1.add_data(data, titles_from_data=True)
+chart1.set_categories(cats)
+chart1.shape = 4
+overviewWS.add_chart(chart1, "H2")
+
+chart2 = BarChart()
+chart2.type = "col"
+chart2.style = 10
+chart2.title = "Race"
+
+data = Reference(overviewWS, min_col=4, min_row=1, max_row=len(all_players) + 1, max_col=6)
+cats = Reference(overviewWS, min_col=1, min_row=2, max_row=len(all_players) + 1)
+chart2.add_data(data, titles_from_data=True)
+chart2.set_categories(cats)
+chart2.shape = 4
+overviewWS.add_chart(chart2, "H18")
+
 # Save the file
-wb.save("sc2.xlsx")
+wb.save(FILE_NAME)
