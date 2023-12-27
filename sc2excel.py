@@ -6,12 +6,14 @@ from openpyxl.chart import BarChart, Reference
 from openpyxl.utils import get_column_letter
 
 FILE_NAME = "sc2.xlsx"
-FOLDER = 'replays/'
+FOLDER = 'replays_/'
 MINIMUM_PLAYERS = 2
+MAXIMUM_AI = 1
 SUM_STRING = '=COUNTIFS(Players!$C:$C,$A{},Players!${}:${},"{}")'
 
 class Game():
     def __init__(self, replay):
+        self.id = f'{replay.date.date()}-{replay.raw_data["replay.initData.backup"]["game_description"]["random_value"]}'
         self.map = replay.map
         self.file_name = replay.filename
         self.type = replay.type
@@ -44,7 +46,7 @@ wb = Workbook()
 
 overviewWS = wb.active
 overviewWS.title = "Overview"
-overviewWS.append(['Name', 'Win', 'Loss', 'Unknown', 'Terran', 'Zerg', 'Protoss'])
+overviewWS.append(['Name', 'Win', 'Loss', 'Unknown', 'Ratio', 'Terran', 'Zerg', 'Protoss'])
 
 gamesWS = wb.create_sheet("Games")
 gamesWS.append(['Date', 'Map', 'Type', 'Length', 'Team 1', 'Team 2'])
@@ -53,18 +55,27 @@ playersWS = wb.create_sheet("Players")
 playersWS.append(['Date', 'Map', 'Name', 'Race', 'Result', 'Handicap'])
 
 all_players = []
-games = []
+games = {}
 
 for replay in replays:
     game = Game(replay)
-    games.append(game)
 
-    print(f'{game.datetime} - {game.map.name} {game.type}, Game length: {round(game.length / 60)}:{game.length % 60}')
-
-for game in sorted(games, key=lambda x: x.datetime, reverse=True):
     if len(game.players) <= MINIMUM_PLAYERS:
         continue
 
+    if len([p for p in game.players if p.is_human == False]) > MAXIMUM_AI:
+        continue
+
+    if game.id in games:
+        if (games[game.id].teams[0].result == None):
+            games[game.id] = game
+    else:
+        games[game.id] = game
+
+    print(f'{game.datetime} - {game.id} - {game.map.name} {game.type}, Game length: {round(game.length / 60)}:{game.length % 60}')
+
+
+for id, game in games.items():
     game_result = []
 
     for team in game.teams:
@@ -86,6 +97,7 @@ for index, player in enumerate(sorted(all_players, key=str.lower, reverse=True))
         SUM_STRING.format(index, 'E', 'E', 'Win'), 
         SUM_STRING.format(index, 'E', 'E', 'Loss'),
         SUM_STRING.format(index, 'E', 'E', ''),
+        '=IF($C{i}>0,$B{i}/$C{i},0)'.format(i=index),
         SUM_STRING.format(index, 'D', 'D', 'Terran'), 
         SUM_STRING.format(index, 'D', 'D', 'Zerg'), 
         SUM_STRING.format(index, 'D', 'D', 'Protoss')
@@ -123,7 +135,7 @@ chart2.type = "col"
 chart2.style = 10
 chart2.title = "Race"
 
-data = Reference(overviewWS, min_col=5, min_row=1, max_row=len(all_players) + 1, max_col=7)
+data = Reference(overviewWS, min_col=6, min_row=1, max_row=len(all_players) + 1, max_col=8)
 cats = Reference(overviewWS, min_col=1, min_row=2, max_row=len(all_players) + 1)
 chart2.add_data(data, titles_from_data=True)
 chart2.set_categories(cats)
